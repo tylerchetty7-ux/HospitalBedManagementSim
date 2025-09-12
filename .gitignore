@@ -1,0 +1,56 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+*.env
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# ---- LaTeX ----
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.log
+*.out
+*.run.xml
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# ---- OS / Editor files ----
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# ---- Build / Output / Data ----
+results/
+*.csv
+*.xlsx
+*.pdf
+
+# ---- Generated diagrams ----
+*.png
+*.svg
+
+# Keep source PlantUML diagrams, ignore rendered images if regenerated automatically
+!diagrams/*.puml
+
+# ---- Other ----
+*.bak
+*.tmp
