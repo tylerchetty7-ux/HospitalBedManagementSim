@@ -49,26 +49,38 @@ class FutureEventList:
     def __repr__(self):
         return f"FEL({self._events})"
 
+# basic simulation engine with clock and event loop  
+class SimulationEngine:
+    # clock
+    def __init__(self):
+        self.clock = 0.0
+        self.fel = FutureEventList()
+
+    def schedule(self, event: Event):
+        """Add an event to FEL."""
+        self.fel.schedule(event)
+
+    def run(self, stop_time: float):
+        """Run the simulation until stop_time or FEL empty."""
+        # event loop
+        while not self.fel.is_empty():
+            evt = self.fel.next_event()
+            if evt.time > stop_time:
+                break
+            self.clock = evt.time
+            print(f"[t={self.clock}] Handling {evt}")
+            # for now just printing events
+
 
 # 
-# quick test block to test future events list
+# quick test block to test simulation engine
 # 
 if __name__ == "__main__":
-    fel = FutureEventList()
+    sim = SimulationEngine()
 
-    # create some fake events
-    e1 = Event(time=5, etype=EventType.ARRIVAL, payload={"patient": 1})
-    e2 = Event(time=2, etype=EventType.ADMIT, payload={"patient": 2})
-    e3 = Event(time=8, etype=EventType.DISCHARGE, payload={"patient": 3})
+    # Schedule some events
+    sim.schedule(Event(time=5, etype=EventType.ARRIVAL, payload={"patient": 1}))
+    sim.schedule(Event(time=2, etype=EventType.ADMIT, payload={"patient": 2}))
+    sim.schedule(Event(time=8, etype=EventType.DISCHARGE, payload={"patient": 3}))
 
-    # schedule them
-    fel.schedule(e1)
-    fel.schedule(e2)
-    fel.schedule(e3)
-
-    print("Initial FEL:", fel)
-
-    # pop events in time order
-    while not fel.is_empty():
-        evt = fel.next_event()
-        print("Processing:", evt)
+    sim.run(stop_time=10)
