@@ -5,25 +5,51 @@ This project models patient arrivals, ICU/Med-Surg bed assignment, cleaning dela
 
 ---
 
-## 📌 Project Description
-This simulation investigates how **admission control policies** (first-available, ICU reservation thresholds, cross-coverage) and **housekeeping staffing levels** affect:
-- ED boarding times (mean and 90th/95th percentile)
-- Unit occupancy and utilization
-- Diversion hours when beds are saturated
-- Queue length distributions and patient throughput
+### Features
+#### Implemented
+- **Core Simulation Engine** (Events, Future Event List, SimulationEngine)
+- **Patient & BedPool models** for ICU and Med-Surg units
+- **MetricsCollector** that records admissions, discharges, and failed admissions
+- Test harness showing basic patient flow and occupancy tracking
 
-The goal is to identify configurations that balance **high bed utilization** with **low ED boarding delays**.
-
----
-
-## 🛠 Features
-- **Arrival Process:** Non-homogeneous Poisson process (NHPP) with time-of-day arrival rates  
-- **Length of Stay:** Lognormal/Gamma LOS distributions parameterized per unit  
-- **Bed Assignment:** Finite-capacity $M_t/G/s$ queue with boarding and discharge events  
-- **Bed Turnover:** Stochastic cleaning delays with limited housekeeping servers  
-- **Admission Policies:** Configurable (first-available, ICU reservation, cross-coverage)  
-- **Metrics Collection:** Boarding time percentiles, occupancy, queue lengths, diversion hours
+#### Future / Upcoming
+- **Arrival Process:** Non-homogeneous Poisson arrivals  
+- **Length of Stay:** Lognormal/Gamma LOS sampling  
+- **Bed Turnover:** Cleaning delays with housekeeping staff limits  
+- **Admission Policies:** First-available, ICU reservation, cross-coverage  
+- **Metrics Expansion:** Boarding time percentiles, queue lengths, diversion hours
 
 ---
 
-## 📂 Repository Structure
+## Repository Structure
+HospitalBedManagementSim/
+│
+├── src/
+│ └── engine.py # Simulation engine + entities
+├── requirements.txt # Dependencies
+├── README.md # Documentation
+└── .gitignore
+
+
+---
+
+## Installation
+Clone the repository and install dependencies:
+```bash
+git clone <your-repo-url>
+cd HospitalBedManagementSim
+pip install -r requirements.txt
+
+## Current test harnesss
+python src/engine.py
+
+## Expected output
+Admitted Patient(id=1, unit=ICU, arrival=0, los=5) to ICU. Occupied=1/1
+No ICU bed available for Patient(id=2, unit=ICU, arrival=1, los=3).
+Discharged Patient(id=1, unit=ICU, arrival=0, los=5) from ICU. Occupied=0/1
+Admitted Patient(id=2, unit=ICU, arrival=1, los=3) to ICU. Occupied=1/1
+Metrics summary: {'admissions': {ICU: 2, MED_SURG: 0},
+                  'discharges': {ICU: 1, MED_SURG: 0},
+                  'failed': {ICU: 1, MED_SURG: 0}}
+
+
