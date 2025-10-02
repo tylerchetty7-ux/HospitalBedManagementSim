@@ -21,18 +21,6 @@ This project models patient arrivals, ICU/Med-Surg bed assignment, cleaning dela
 
 ---
 
-## Repository Structure
-HospitalBedManagementSim/
-│
-├── src/
-│ └── engine.py # Simulation engine + entities
-├── requirements.txt # Dependencies
-├── README.md # Documentation
-└── .gitignore
-
-
----
-
 ## Installation
 Clone the repository and install dependencies:
 ```bash
