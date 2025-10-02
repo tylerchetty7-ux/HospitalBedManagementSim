@@ -14,11 +14,11 @@ class Event:
         self.time = time
         self.type = etype
         self.payload = payload or {}
-
     # allow sorting by time when stored in a heap
+
     def __lt__(self, other):
         return self.time < other.time
-
+    
     def __repr__(self):
         return f"Event(time={self.time}, type={self.type.name}, payload={self.payload})"
 
@@ -67,29 +67,58 @@ class Patient:
     def __repr__(self):
         return (f"Patient(id={self.id}, unit={self.unit.name}, "
                 f"arrival={self.arrival_time}, los={self.los})")
-# entity to request beds
+
+# data collection entity (tracks admissions, discharges, and failed admissions)
+class MetricsCollector:
+    def __init__(self):
+        self.admissions = {UnitType.ICU: 0, UnitType.MED_SURG: 0}
+        self.discharges = {UnitType.ICU: 0, UnitType.MED_SURG: 0}
+        self.failed = {UnitType.ICU: 0, UnitType.MED_SURG: 0}
+
+    def record_admission(self, patient: Patient):
+        self.admissions[patient.unit] += 1
+
+    def record_discharge(self, patient: Patient):
+        self.discharges[patient.unit] += 1
+
+    def record_failed(self, patient: Patient):
+        self.failed[patient.unit] += 1
+
+    def summary(self):
+        return {
+            "admissions": self.admissions,
+            "discharges": self.discharges,
+            "failed": self.failed
+        }
+
+# entity to request beds (modified to include metrics)
 class BedPool:
-    def __init__(self, unit: UnitType, capacity: int):
+    def __init__(self, unit: UnitType, capacity: int, metrics: MetricsCollector = None):
         self.unit = unit
         self.capacity = capacity
         self.occupied = 0
+        self.metrics = metrics
 
     def request_bed(self, patient: Patient) -> bool:
-        """Try to assign a bed to a patient. Returns True if success, False if full."""
         if self.occupied < self.capacity:
             self.occupied += 1
-            patient.admit_time = patient.arrival_time  # temporary (we’ll refine later)
+            patient.admit_time = patient.arrival_time
+            if self.metrics:
+                self.metrics.record_admission(patient)
             print(f"Admitted {patient} to {self.unit.name}. Occupied={self.occupied}/{self.capacity}")
             return True
         else:
+            if self.metrics:
+                self.metrics.record_failed(patient)
             print(f"No {self.unit.name} bed available for {patient}.")
             return False
 
     def release_bed(self, patient: Patient):
-        """Release a bed when a patient is discharged."""
         if self.occupied > 0:
             self.occupied -= 1
             patient.discharge_time = patient.arrival_time + patient.los
+            if self.metrics:
+                self.metrics.record_discharge(patient)
             print(f"Discharged {patient} from {self.unit.name}. Occupied={self.occupied}/{self.capacity}")
 
 # basic simulation engine with clock and event loop  
@@ -116,21 +145,20 @@ class SimulationEngine:
 
 
 # 
-# test block to test patient bed requests
+# test block to test patient data collection
 # 
 if __name__ == "__main__":
-    # create 2 patients
+    metrics = MetricsCollector()
+    icu_beds = BedPool(UnitType.ICU, capacity=1, metrics=metrics)
+
     p1 = Patient(pid=1, unit=UnitType.ICU, arrival_time=0, los=5)
     p2 = Patient(pid=2, unit=UnitType.ICU, arrival_time=1, los=3)
 
-    # ICU with 1 bed
-    icu_beds = BedPool(UnitType.ICU, capacity=1)
-
-    # try to admit both patients
-    icu_beds.request_bed(p1)  # should admit
-    icu_beds.request_bed(p2)  # should fail (full)
-
-    # release p1, then admit p2 again
+    icu_beds.request_bed(p1)
+    icu_beds.request_bed(p2)  
     icu_beds.release_bed(p1)
     icu_beds.request_bed(p2)
+
+    print("Metrics summary:", metrics.summary())
+
 
