@@ -49,6 +49,49 @@ class FutureEventList:
     def __repr__(self):
         return f"FEL({self._events})"
 
+# units in the hospital
+class UnitType(Enum):
+    ICU = 1
+    MED_SURG = 2
+
+# patient entity
+class Patient:
+    def __init__(self, pid: int, unit: UnitType, arrival_time: float, los: float):
+        self.id = pid
+        self.unit = unit
+        self.arrival_time = arrival_time
+        self.los = los
+        self.admit_time = None
+        self.discharge_time = None
+
+    def __repr__(self):
+        return (f"Patient(id={self.id}, unit={self.unit.name}, "
+                f"arrival={self.arrival_time}, los={self.los})")
+# entity to request beds
+class BedPool:
+    def __init__(self, unit: UnitType, capacity: int):
+        self.unit = unit
+        self.capacity = capacity
+        self.occupied = 0
+
+    def request_bed(self, patient: Patient) -> bool:
+        """Try to assign a bed to a patient. Returns True if success, False if full."""
+        if self.occupied < self.capacity:
+            self.occupied += 1
+            patient.admit_time = patient.arrival_time  # temporary (we’ll refine later)
+            print(f"Admitted {patient} to {self.unit.name}. Occupied={self.occupied}/{self.capacity}")
+            return True
+        else:
+            print(f"No {self.unit.name} bed available for {patient}.")
+            return False
+
+    def release_bed(self, patient: Patient):
+        """Release a bed when a patient is discharged."""
+        if self.occupied > 0:
+            self.occupied -= 1
+            patient.discharge_time = patient.arrival_time + patient.los
+            print(f"Discharged {patient} from {self.unit.name}. Occupied={self.occupied}/{self.capacity}")
+
 # basic simulation engine with clock and event loop  
 class SimulationEngine:
     # clock
@@ -73,14 +116,21 @@ class SimulationEngine:
 
 
 # 
-# quick test block to test simulation engine
+# test block to test patient bed requests
 # 
 if __name__ == "__main__":
-    sim = SimulationEngine()
+    # create 2 patients
+    p1 = Patient(pid=1, unit=UnitType.ICU, arrival_time=0, los=5)
+    p2 = Patient(pid=2, unit=UnitType.ICU, arrival_time=1, los=3)
 
-    # Schedule some events
-    sim.schedule(Event(time=5, etype=EventType.ARRIVAL, payload={"patient": 1}))
-    sim.schedule(Event(time=2, etype=EventType.ADMIT, payload={"patient": 2}))
-    sim.schedule(Event(time=8, etype=EventType.DISCHARGE, payload={"patient": 3}))
+    # ICU with 1 bed
+    icu_beds = BedPool(UnitType.ICU, capacity=1)
 
-    sim.run(stop_time=10)
+    # try to admit both patients
+    icu_beds.request_bed(p1)  # should admit
+    icu_beds.request_bed(p2)  # should fail (full)
+
+    # release p1, then admit p2 again
+    icu_beds.release_bed(p1)
+    icu_beds.request_bed(p2)
+
