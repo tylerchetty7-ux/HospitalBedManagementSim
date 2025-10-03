@@ -21,6 +21,15 @@ This project models patient arrivals, ICU/Med-Surg bed assignment, cleaning dela
 
 ---
 
+## Project Structure
+├── src/
+│   └── engine.py        # main simulation source
+├── docs/
+│   └── M2_report.docx   # milestone deliverables
+├── requirements.txt
+├── .gitignore
+└── README.md
+
 ## Installation
 Clone the repository and install dependencies:
 ```bash
@@ -28,7 +37,9 @@ git clone <your-repo-url>
 cd HospitalBedManagementSim
 pip install -r requirements.txt
 
-## Current test harnesss
+## Usage
+Run the basic test harness:
+```bash
 python src/engine.py
 
 ## Expected output
