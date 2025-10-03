@@ -23,9 +23,9 @@ This project models patient arrivals, ICU/Med-Surg bed assignment, cleaning dela
 
 ## Project Structure
 ├── src/
-│   └── engine.py        # main simulation source
+│   └── engine.py       
 ├── docs/
-│   └── M2_report.docx   # milestone deliverables
+│   
 ├── requirements.txt
 ├── .gitignore
 └── README.md
