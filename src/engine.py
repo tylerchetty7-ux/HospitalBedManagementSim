@@ -2,10 +2,13 @@ import heapq
 from enum import Enum
 import random
 import numpy as np
+from collections import deque
+import csv, json, os
 
 
-
-# each event represents a discrete change in system state (arrival, admission, discharge, etc.).
+# ============================
+# EVENT TYPES
+# ============================
 class EventType(Enum):
     ARRIVAL = 1
     ADMIT = 2
@@ -13,7 +16,9 @@ class EventType(Enum):
     TURNOVER_DONE = 4
 
 
-# event object stored in the Future Event List (FEL)
+# ============================
+# EVENT OBJECT
+# ============================
 class Event:
     def __init__(self, time, etype: EventType, payload=None):
         self.time = time
@@ -27,46 +32,31 @@ class Event:
         return f"Event(time={self.time}, type={self.type.name}, payload={self.payload})"
 
 
-# -------------------------
+# ============================
 # FUTURE EVENT LIST (FEL)
-# -------------------------
+# ============================
 class FutureEventList:
     def __init__(self):
         self._events = []
 
     def schedule(self, event: Event):
-        """Add event to heap (sorted automatically by time)."""
         heapq.heappush(self._events, event)
 
     def next_event(self):
-        """Pop the earliest scheduled event."""
-        if self._events:
-            return heapq.heappop(self._events)
-        return None
-
-    def peek(self):
-        """Preview the next event without removing it."""
-        return self._events[0] if self._events else None
+        return heapq.heappop(self._events) if self._events else None
 
     def is_empty(self):
         return len(self._events) == 0
 
-    def __len__(self):
-        return len(self._events)
 
-    def __repr__(self):
-        return f"FEL({self._events})"
-
-
-# -------------------------
-# HOSPITAL UNITS & PATIENTS
-# -------------------------
+# ============================
+# UNIT & PATIENT ENTITIES
+# ============================
 class UnitType(Enum):
     ICU = 1
     MED_SURG = 2
 
 
-# patient entity with core timestamps and LOS data.
 class Patient:
     def __init__(self, pid: int, unit: UnitType, arrival_time: float, los: float):
         self.id = pid
@@ -83,17 +73,20 @@ class Patient:
         )
 
 
-# -------------------------
+# ============================
 # METRICS COLLECTION
-# -------------------------
-# tracks high-level system outcomes: admissions, discharges, failures, and boarding delays.
+# ============================
 class MetricsCollector:
     def __init__(self):
         self.admissions = {UnitType.ICU: 0, UnitType.MED_SURG: 0}
         self.discharges = {UnitType.ICU: 0, UnitType.MED_SURG: 0}
         self.failed = {UnitType.ICU: 0, UnitType.MED_SURG: 0}
-        # boarding times (patients who had to wait for beds)
         self.boarding_times = {UnitType.ICU: [], UnitType.MED_SURG: []}
+        self.last_time = 0.0
+        self.occ_area = {UnitType.ICU: 0.0, UnitType.MED_SURG: 0.0}
+        self.q_area = {UnitType.ICU: 0.0, UnitType.MED_SURG: 0.0}
+        self.max_occ = {UnitType.ICU: 0, UnitType.MED_SURG: 0}
+        self.max_queue = {UnitType.ICU: 0, UnitType.MED_SURG: 0}
 
     def record_admission(self, patient: Patient):
         self.admissions[patient.unit] += 1
@@ -105,34 +98,46 @@ class MetricsCollector:
         self.failed[patient.unit] += 1
 
     def record_boarding(self, patient: Patient, wait_time: float):
-        """Track patient wait times for queue/boarding metrics."""
         self.boarding_times[patient.unit].append(wait_time)
 
+    def update_state_areas(self, now: float, beds: dict, queues: dict):
+        dt = now - self.last_time
+        if dt < 0:
+            return
+        for u in beds:
+            self.occ_area[u] += beds[u].occupied * dt
+            self.q_area[u] += len(queues[u]) * dt
+            self.max_occ[u] = max(self.max_occ[u], beds[u].occupied)
+            self.max_queue[u] = max(self.max_queue[u], len(queues[u]))
+        self.last_time = now
+
     def summary(self):
-        """Return summary metrics for reporting."""
-        base = {
+        return {
             "admissions": self.admissions,
             "discharges": self.discharges,
             "failed": self.failed,
             "avg_boarding_time": {
-                unit: (float(np.mean(times)) if times else 0.0)
-                for unit, times in self.boarding_times.items()
+                u: (float(np.mean(v)) if v else 0.0) for u, v in self.boarding_times.items()
             },
             "max_boarding_time": {
-                unit: (float(np.max(times)) if times else 0.0)
-                for unit, times in self.boarding_times.items()
+                u: (float(np.max(v)) if v else 0.0) for u, v in self.boarding_times.items()
             },
-            "boarded_count": {
-                unit: len(times) for unit, times in self.boarding_times.items()
+            "boarded_count": {u: len(v) for u, v in self.boarding_times.items()},
+            "avg_occupancy": {
+                u: round(self.occ_area[u] / max(self.last_time, 1e-9), 3) for u in self.occ_area
             },
+            "avg_queue_len": {
+                u: round(self.q_area[u] / max(self.last_time, 1e-9), 3) for u in self.q_area
+            },
+            "max_occupancy": self.max_occ,
+            "max_queue_len": self.max_queue,
+            "sim_time": round(self.last_time, 3),
         }
-        return base
 
 
-# -------------------------
-# BED MANAGEMENT ENTITY
-# -------------------------
-# handles capacity management, admissions, and occupancy counts for each unit.
+# ============================
+# BED & HOUSEKEEPING
+# ============================
 class BedPool:
     def __init__(self, unit: UnitType, capacity: int, metrics: MetricsCollector = None):
         self.unit = unit
@@ -141,7 +146,6 @@ class BedPool:
         self.metrics = metrics
 
     def request_bed(self, patient: Patient, now: float) -> bool:
-        """Try to admit patient if bed is available."""
         if self.occupied < self.capacity:
             self.occupied += 1
             patient.admit_time = now
@@ -153,8 +157,6 @@ class BedPool:
             )
             return True
         else:
-            if self.metrics:
-                self.metrics.record_failed(patient)
             print(
                 f"[t={now}] ADMIT FAIL: No {self.unit.name} bed for {patient} "
                 f"(Occupied={self.occupied}/{self.capacity})"
@@ -162,8 +164,40 @@ class BedPool:
             return False
 
 
+class HousekeepingPool:
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self.busy = 0
+        self.active_cleanings = []
+        self.wait_queue = deque()
 
+    def _start_cleaning_now(self, unit: UnitType, now: float):
+        self.busy += 1
+        self.active_cleanings.append((unit, now))
+
+    def request_cleaner(self, unit: UnitType, turnover_time: float, now: float) -> bool:
+        if self.busy < self.capacity:
+            self._start_cleaning_now(unit, now)
+            return True
+        else:
+            self.wait_queue.append((unit, turnover_time))
+            return False
+
+    def release_cleaner(self, now: float):
+        if self.busy > 0:
+            self.busy -= 1
+        if self.active_cleanings:
+            self.active_cleanings.pop(0)
+        if self.wait_queue:
+            next_unit, next_turnover = self.wait_queue.popleft()
+            self._start_cleaning_now(next_unit, now)
+            return (next_unit, next_turnover)
+        return None
+
+
+# ============================
 # SIMULATION ENGINE
+# ============================
 class SimulationEngine:
     def __init__(
         self,
@@ -171,20 +205,19 @@ class SimulationEngine:
         metrics: MetricsCollector,
         arrival_rate: float = 0.5,
         random_seed: int = 42,
+        horizon: float = 100.0,
+        warmdown: float | None = None,
     ):
-        # simulation clock and event list
         self.clock = 0.0
         self.fel = FutureEventList()
         self.beds = beds_by_unit
         self.metrics = metrics
 
-        # random process parameters
-        self.arrival_rate = arrival_rate  # λ for Poisson arrivals
+        self.arrival_rate = arrival_rate
         self.random_seed = random_seed
         random.seed(self.random_seed)
         np.random.seed(self.random_seed)
 
-        # distribution parameters for length of stay (LOS) and turnover
         self.los_params = {
             UnitType.ICU: {"mean": 1.6, "sigma": 0.4},
             UnitType.MED_SURG: {"mean": 1.2, "sigma": 0.3},
@@ -194,36 +227,80 @@ class SimulationEngine:
             UnitType.MED_SURG: {"mean": 0.6, "sigma": 0.15},
         }
 
-        # boarding queues (First Come, First Served)
-        self.queues = {UnitType.ICU: [], UnitType.MED_SURG: []}
+        self.queues = {UnitType.ICU: deque(), UnitType.MED_SURG: deque()}
+        self.max_queue_len = {UnitType.ICU: 15, UnitType.MED_SURG: 20}
+        self.max_wait_hours = {UnitType.ICU: 48.0, UnitType.MED_SURG: 24.0}
+        self.housekeeping = HousekeepingPool(capacity=2)
+
+        self.horizon = horizon
+        self.warmdown_limit = warmdown
+        self.arrivals_open = True
+        self.last_event_time = 0.0
+
+        self.event_log = []
+        self.state_log = []
+        self.log_interval = 1.0
+        self.next_log_time = 0.0
+
+        # ✅ Fixed path: save to project root
+        self.output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "output"))
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        self.run_id = f"run_{self.random_seed}"
 
     def schedule(self, event: Event):
         self.fel.schedule(event)
 
     def sample_los(self, unit: UnitType) -> float:
-        """Sample lognormal length of stay."""
         params = self.los_params[unit]
         return float(np.random.lognormal(mean=params["mean"], sigma=params["sigma"]))
 
     def sample_turnover(self, unit: UnitType) -> float:
-        """Sample lognormal housekeeping time."""
         params = self.turnover_params[unit]
         return float(np.random.lognormal(mean=params["mean"], sigma=params["sigma"]))
 
-    # main simulation loop
-    def run(self, stop_time: float):
-        """Main simulation event loop."""
+    def run(self):
         while not self.fel.is_empty():
             evt = self.fel.next_event()
-            if evt.time > stop_time:
+            if self.warmdown_limit is not None and evt.time > (self.horizon + self.warmdown_limit):
                 break
-            self.clock = evt.time
-            print(f"\n[t={self.clock}] Handling {evt.type.name}")
-            self.dispatch(evt)
 
-    # event dispatch
+            self.clock = evt.time
+            self.last_event_time = self.clock
+            self.metrics.update_state_areas(self.clock, self.beds, self.queues)
+
+            if self.arrivals_open and self.clock >= self.horizon:
+                self.arrivals_open = False
+
+            print(f"\n[t={self.clock}] Handling {evt.type.name}")
+
+            self.event_log.append({
+                "time": round(self.clock, 3),
+                "event_type": evt.type.name,
+                "unit": evt.payload.get("patient", {}).unit.name
+                    if isinstance(evt.payload.get("patient"), Patient)
+                    else evt.payload.get("unit", None).name
+                    if evt.payload.get("unit") else None,
+                "patient_id": getattr(evt.payload.get("patient"), "id", None)
+            })
+
+            self.dispatch(evt)
+            self.metrics.update_state_areas(self.last_event_time, self.beds, self.queues)
+
+            if self.clock >= self.next_log_time:
+                self.state_log.append({
+                    "time": round(self.clock, 3),
+                    "icu_occupied": self.beds[UnitType.ICU].occupied,
+                    "med_occupied": self.beds[UnitType.MED_SURG].occupied,
+                    "icu_queue": len(self.queues[UnitType.ICU]),
+                    "med_queue": len(self.queues[UnitType.MED_SURG]),
+                    "housekeepers_busy": self.housekeeping.busy
+                })
+                self.next_log_time += self.log_interval
+
+        self.export_results()
+
     def dispatch(self, evt: Event):
-        """Send event to appropriate handler."""
         if evt.type == EventType.ARRIVAL:
             self.handle_arrival(evt)
         elif evt.type == EventType.ADMIT:
@@ -232,77 +309,132 @@ class SimulationEngine:
             self.handle_discharge(evt)
         elif evt.type == EventType.TURNOVER_DONE:
             self.handle_turnover_done(evt)
-        else:
-            raise ValueError(f"Unknown event type: {evt.type}")
 
-    # event handlers
+    # ---- Event handlers ----
     def handle_arrival(self, evt: Event):
-        """Create a new patient and schedule their admission attempt."""
         unit = UnitType.ICU if random.random() < 0.3 else UnitType.MED_SURG
         pid = int(random.random() * 1e6)
         los = self.sample_los(unit)
         patient = Patient(pid=pid, unit=unit, arrival_time=self.clock, los=los)
-
-        # immediate admission attempt
         self.schedule(Event(time=self.clock, etype=EventType.ADMIT, payload={"patient": patient}))
 
-        # schedule next random arrival
-        next_time = self.clock + random.expovariate(self.arrival_rate)
-        self.schedule(Event(time=next_time, etype=EventType.ARRIVAL))
+        if self.arrivals_open:
+            next_time = self.clock + random.expovariate(self.arrival_rate)
+            if next_time < self.horizon:
+                self.schedule(Event(time=next_time, etype=EventType.ARRIVAL))
 
     def handle_admit(self, evt: Event):
-        """Try to admit patient or enqueue if full (FCFS)."""
         patient: Patient = evt.payload["patient"]
         pool = self.beds[patient.unit]
+        queue = self.queues[patient.unit]
 
-        # FCFS: enqueue if anyone is already waiting or unit full
-        if self.queues[patient.unit] or pool.occupied >= pool.capacity:
-            self.queues[patient.unit].append(patient)
-            print(f"[t={self.clock}] QUEUE: {patient} waiting for {patient.unit.name} bed "
-                  f"(QueueLen={len(self.queues[patient.unit])})")
+        if queue or pool.occupied >= pool.capacity:
+            if len(queue) >= self.max_queue_len[patient.unit]:
+                self.metrics.record_failed(patient)
+                print(f"[t={self.clock}] DIVERTED: {patient} due to full queue (len={len(queue)})")
+                return
+            queue.append(patient)
+            print(f"[t={self.clock}] QUEUE: {patient} waiting for {patient.unit.name} bed (QueueLen={len(queue)})")
             return
 
-        # admit directly (bed available)
         pool.request_bed(patient, now=self.clock)
-        discharge_time = self.clock + patient.los
-        self.schedule(Event(time=discharge_time, etype=EventType.DISCHARGE, payload={"patient": patient}))
+        self.schedule(Event(time=self.clock + patient.los, etype=EventType.DISCHARGE, payload={"patient": patient}))
 
     def handle_discharge(self, evt: Event):
-        """Start turnover process after patient leaves."""
         patient: Patient = evt.payload["patient"]
         pool = self.beds[patient.unit]
+        self.metrics.record_discharge(patient)
+        patient.discharge_time = self.clock
         turnover_time = self.sample_turnover(patient.unit)
-        turnover_done_time = self.clock + turnover_time
-
         print(f"[t={self.clock}] DISCHARGE: {patient} (Bed entering turnover for {turnover_time:.2f} hrs)")
-        self.schedule(Event(time=turnover_done_time, etype=EventType.TURNOVER_DONE, payload={"unit": patient.unit}))
-        pool.metrics.record_discharge(patient)
+        started = self.housekeeping.request_cleaner(patient.unit, turnover_time, now=self.clock)
+        if started:
+            self.schedule(Event(time=self.clock + turnover_time, etype=EventType.TURNOVER_DONE, payload={"unit": patient.unit}))
+        else:
+            print(f"[t={self.clock}] All cleaners busy — {patient.unit.name} bed queued for cleaning.")
 
     def handle_turnover_done(self, evt: Event):
-        """Free bed and admit next patient in queue if any."""
         unit = evt.payload["unit"]
         pool = self.beds[unit]
-
-        # free capacity after cleaning
         if pool.occupied > 0:
             pool.occupied -= 1
-        print(f"[t={self.clock}] TURNOVER_DONE: {unit.name} bed cleaned "
-              f"(Occupied={pool.occupied}/{pool.capacity})")
+        print(f"[t={self.clock}] TURNOVER_DONE: {unit.name} bed cleaned (Occupied={pool.occupied}/{pool.capacity})")
 
-        # admit next patient from queue
+        next_job = self.housekeeping.release_cleaner(now=self.clock)
+        if next_job:
+            next_unit, next_turnover = next_job
+            next_done_time = self.clock + next_turnover
+            print(f"[t={self.clock}] HOUSEKEEPER reassigned → new {next_unit.name} cleaning (will finish at {next_done_time:.2f})")
+            self.schedule(Event(time=next_done_time, etype=EventType.TURNOVER_DONE, payload={"unit": next_unit}))
+
         if self.queues[unit]:
-            next_patient = self.queues[unit].pop(0)
+            next_patient = self.queues[unit].popleft()
             wait_time = self.clock - next_patient.arrival_time
+            if wait_time > self.max_wait_hours[unit]:
+                self.metrics.record_failed(next_patient)
+                print(f"[t={self.clock}] DIVERTED (timeout): {next_patient} waited {wait_time:.2f} hrs")
+                return
             self.metrics.record_boarding(next_patient, wait_time)
             print(f"[t={self.clock}] ADMIT FROM QUEUE: {next_patient} waited {wait_time:.2f} hrs")
             pool.request_bed(next_patient, now=self.clock)
-            discharge_time = self.clock + next_patient.los
-            self.schedule(Event(time=discharge_time, etype=EventType.DISCHARGE, payload={"patient": next_patient}))
+            self.schedule(Event(time=self.clock + next_patient.los, etype=EventType.DISCHARGE, payload={"patient": next_patient}))
+
+    def export_results(self):
+        """Write event log, time-series, and summary to CSV/JSON."""
+        if not self.event_log:
+            print("[WARN] No events logged; nothing to export.")
+            return
+
+        # 1. Events CSV
+        events_path = os.path.join(self.output_dir, f"{self.run_id}_events.csv")
+        with open(events_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=self.event_log[0].keys())
+            writer.writeheader()
+            writer.writerows(self.event_log)
+
+        # 2. Time-series CSV
+        if self.state_log:
+            ts_path = os.path.join(self.output_dir, f"{self.run_id}_timeseries.csv")
+            with open(ts_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=self.state_log[0].keys())
+                writer.writeheader()
+                writer.writerows(self.state_log)
+
+        # 3. Summary JSON — convert Enum keys to strings
+        metrics_summary = {}
+        for key, val in self.metrics.summary().items():
+            if isinstance(val, dict):
+                # Convert Enum keys (UnitType.ICU → "ICU")
+                metrics_summary[key] = {
+                    (u.name if isinstance(u, Enum) else u): v for u, v in val.items()
+                }
+            else:
+                metrics_summary[key] = val
+
+        summary_path = os.path.join(self.output_dir, f"{self.run_id}_summary.json")
+        summary_data = {
+            "run_id": self.run_id,
+            "params": {
+                "arrival_rate": self.arrival_rate,
+                "icu_capacity": self.beds[UnitType.ICU].capacity,
+                "med_capacity": self.beds[UnitType.MED_SURG].capacity,
+                "housekeepers": self.housekeeping.capacity,
+                "horizon": self.horizon,
+                "seed": self.random_seed
+            },
+            "metrics": metrics_summary
+        }
+
+        with open(summary_path, "w") as f:
+            json.dump(summary_data, f, indent=2)
+
+        print(f"\n[Run {self.run_id}] Data exported to {self.output_dir}")
 
 
-# -------------------------
-# SIMULATION RUN
-# -------------------------
+
+# ============================
+# MAIN EXECUTION
+# ============================
 if __name__ == "__main__":
     metrics = MetricsCollector()
     icu_beds = BedPool(UnitType.ICU, capacity=1, metrics=metrics)
@@ -311,14 +443,16 @@ if __name__ == "__main__":
     engine = SimulationEngine(
         beds_by_unit={UnitType.ICU: icu_beds, UnitType.MED_SURG: med_beds},
         metrics=metrics,
+        horizon=100.0,
+        warmdown=None
     )
 
-    # schedule initial arrival event to start system
+    engine.housekeeping.capacity = 2
+
     first_time = random.expovariate(engine.arrival_rate)
+    if first_time >= engine.horizon:
+        first_time = 0.0
     engine.schedule(Event(time=first_time, etype=EventType.ARRIVAL))
 
-    # run until simulation horizon
-    engine.run(stop_time=100)
-
-    # display end-of-run summary statistics
+    engine.run()
     print("\nMetrics summary:", metrics.summary())
