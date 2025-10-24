@@ -14,38 +14,26 @@ class Event:
         self.time = time
         self.type = etype
         self.payload = payload or {}
-    # allow sorting by time when stored in a heap
-
     def __lt__(self, other):
         return self.time < other.time
-    
     def __repr__(self):
         return f"Event(time={self.time}, type={self.type.name}, payload={self.payload})"
 
 class FutureEventList:
     def __init__(self):
         self._events = []
-
     def schedule(self, event: Event):
-        """Add an event to the FEL (sorted by time)."""
         heapq.heappush(self._events, event)
-
     def next_event(self):
-        """Pop the earliest event (smallest time)."""
         if self._events:
             return heapq.heappop(self._events)
         return None
-
     def peek(self):
-        """Look at the earliest event without removing it."""
         return self._events[0] if self._events else None
-
     def is_empty(self):
         return len(self._events) == 0
-
     def __len__(self):
         return len(self._events)
-
     def __repr__(self):
         return f"FEL({self._events})"
 
@@ -63,7 +51,6 @@ class Patient:
         self.los = los
         self.admit_time = None
         self.discharge_time = None
-
     def __repr__(self):
         return (f"Patient(id={self.id}, unit={self.unit.name}, "
                 f"arrival={self.arrival_time}, los={self.los})")
@@ -74,16 +61,12 @@ class MetricsCollector:
         self.admissions = {UnitType.ICU: 0, UnitType.MED_SURG: 0}
         self.discharges = {UnitType.ICU: 0, UnitType.MED_SURG: 0}
         self.failed = {UnitType.ICU: 0, UnitType.MED_SURG: 0}
-
     def record_admission(self, patient: Patient):
         self.admissions[patient.unit] += 1
-
     def record_discharge(self, patient: Patient):
         self.discharges[patient.unit] += 1
-
     def record_failed(self, patient: Patient):
         self.failed[patient.unit] += 1
-
     def summary(self):
         return {
             "admissions": self.admissions,
@@ -91,7 +74,7 @@ class MetricsCollector:
             "failed": self.failed
         }
 
-# entity to request beds (modified to include metrics)
+# entity to request beds (uses current sim time for admit/discharge timestamps)
 class BedPool:
     def __init__(self, unit: UnitType, capacity: int, metrics: MetricsCollector = None):
         self.unit = unit
@@ -99,66 +82,104 @@ class BedPool:
         self.occupied = 0
         self.metrics = metrics
 
-    def request_bed(self, patient: Patient) -> bool:
+    def request_bed(self, patient: Patient, now: float) -> bool:
         if self.occupied < self.capacity:
             self.occupied += 1
-            patient.admit_time = patient.arrival_time
+            patient.admit_time = now
             if self.metrics:
                 self.metrics.record_admission(patient)
-            print(f"Admitted {patient} to {self.unit.name}. Occupied={self.occupied}/{self.capacity}")
+            print(f"[t={now}] ADMIT: {patient} -> {self.unit.name} "
+                  f"(Occupied={self.occupied}/{self.capacity})")
             return True
         else:
             if self.metrics:
                 self.metrics.record_failed(patient)
-            print(f"No {self.unit.name} bed available for {patient}.")
+            print(f"[t={now}] ADMIT FAIL: No {self.unit.name} bed for {patient} "
+                  f"(Occupied={self.occupied}/{self.capacity})")
             return False
 
-    def release_bed(self, patient: Patient):
+    def release_bed(self, patient: Patient, now: float):
         if self.occupied > 0:
             self.occupied -= 1
-            patient.discharge_time = patient.arrival_time + patient.los
+            patient.discharge_time = now
             if self.metrics:
                 self.metrics.record_discharge(patient)
-            print(f"Discharged {patient} from {self.unit.name}. Occupied={self.occupied}/{self.capacity}")
+            print(f"[t={now}] DISCHARGE: {patient} from {self.unit.name} "
+                  f"(Occupied={self.occupied}/{self.capacity})")
 
-# basic simulation engine with clock and event loop  
+# basic simulation engine with clock, event loop, and handlers
 class SimulationEngine:
-    # clock
-    def __init__(self):
+    def __init__(self, beds_by_unit: dict[UnitType, BedPool], metrics: MetricsCollector):
         self.clock = 0.0
         self.fel = FutureEventList()
+        self.beds = beds_by_unit
+        self.metrics = metrics
 
     def schedule(self, event: Event):
-        """Add an event to FEL."""
         self.fel.schedule(event)
 
     def run(self, stop_time: float):
-        """Run the simulation until stop_time or FEL empty."""
-        # event loop
         while not self.fel.is_empty():
             evt = self.fel.next_event()
             if evt.time > stop_time:
                 break
             self.clock = evt.time
-            print(f"[t={self.clock}] Handling {evt}")
-            # for now just printing events
+            print(f"\n[t={self.clock}] Handling {evt.type.name}")
+            self.dispatch(evt)
 
+    # only handlers implemented (no stochastic generation, no queues/turnover yet)
+    def dispatch(self, evt: Event):
+        if evt.type == EventType.ARRIVAL:
+            self.handle_arrival(evt)
+        elif evt.type == EventType.ADMIT:
+            self.handle_admit(evt)
+        elif evt.type == EventType.DISCHARGE:
+            self.handle_discharge(evt)
+        elif evt.type == EventType.TURNOVER_DONE:
+            self.handle_turnover_done(evt)
+        else:
+            raise ValueError(f"Unknown event type: {evt.type}")
 
-# 
-# test block to test patient data collection
-# 
+    def handle_arrival(self, evt: Event):
+        # expect a Patient object in payload
+        patient: Patient = evt.payload["patient"]
+        # schedule an immediate ADMIT attempt at the same time
+        self.schedule(Event(time=self.clock, etype=EventType.ADMIT, payload={"patient": patient}))
+
+    def handle_admit(self, evt: Event):
+        patient: Patient = evt.payload["patient"]
+        pool = self.beds[patient.unit]
+        admitted = pool.request_bed(patient, now=self.clock)
+        if admitted:
+            # directly schedule discharge at admit_time + LOS
+            discharge_time = self.clock + patient.los
+            self.schedule(Event(time=discharge_time, etype=EventType.DISCHARGE, payload={"patient": patient}))
+        # if not admitted, does nothing further (queues/boarding are later implemented)
+
+    def handle_discharge(self, evt: Event):
+        patient: Patient = evt.payload["patient"]
+        pool = self.beds[patient.unit]
+        pool.release_bed(patient, now=self.clock)
+        
+
+    def handle_turnover_done(self, evt: Event):
+        # placeholder for testing; included to show the full lifecycle structure
+        print(f"[t={self.clock}] TURNOVER_DONE (noop in Step 1) payload={evt.payload}")
+
+# --------------- simple deterministic demo (only handlers) ----------------
 if __name__ == "__main__":
     metrics = MetricsCollector()
     icu_beds = BedPool(UnitType.ICU, capacity=1, metrics=metrics)
 
+    engine = SimulationEngine(beds_by_unit={UnitType.ICU: icu_beds}, metrics=metrics)
+
     p1 = Patient(pid=1, unit=UnitType.ICU, arrival_time=0, los=5)
     p2 = Patient(pid=2, unit=UnitType.ICU, arrival_time=1, los=3)
 
-    icu_beds.request_bed(p1)
-    icu_beds.request_bed(p2)  
-    icu_beds.release_bed(p1)
-    icu_beds.request_bed(p2)
+    # schedule arrivals (handlers will attempt admission and schedule discharge)
+    engine.schedule(Event(time=p1.arrival_time, etype=EventType.ARRIVAL, payload={"patient": p1}))
+    engine.schedule(Event(time=p2.arrival_time, etype=EventType.ARRIVAL, payload={"patient": p2}))
 
-    print("Metrics summary:", metrics.summary())
+    engine.run(stop_time=100)
 
-
+    print("\nMetrics summary:", metrics.summary())
