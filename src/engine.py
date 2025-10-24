@@ -162,6 +162,12 @@ class SimulationEngine:
             UnitType.ICU: {"mean": 1.6, "sigma": 0.4},
             UnitType.MED_SURG: {"mean": 1.2, "sigma": 0.3},
         }
+        
+        # parameters for housekeeping/turnover times
+        self.turnover_params = {
+        UnitType.ICU: {"mean": 0.8, "sigma": 0.2},
+        UnitType.MED_SURG: {"mean": 0.6, "sigma": 0.15},
+        }
 
     def schedule(self, event: Event):
         self.fel.schedule(event)
@@ -172,6 +178,11 @@ class SimulationEngine:
         return float(
             np.random.lognormal(mean=params["mean"], sigma=params["sigma"])
         )
+
+    def sample_turnover(self, unit: UnitType) -> float:
+        """Draw a random housekeeping/turnover time from a lognormal distribution."""
+        params = self.turnover_params[unit]
+        return float(np.random.lognormal(mean=params["mean"], sigma=params["sigma"]))
 
     def run(self, stop_time: float):
         while not self.fel.is_empty():
@@ -196,20 +207,20 @@ class SimulationEngine:
             raise ValueError(f"Unknown event type: {evt.type}")
 
     def handle_arrival(self, evt: Event):
-        # Determine unit probabilistically (e.g., 30% ICU, 70% Med/Surg)
+        # determine unit probabilistically (example: 30% ICU, 70% Med/Surg)
         unit = UnitType.ICU if random.random() < 0.3 else UnitType.MED_SURG
 
-        # Create patient with sampled LOS
+        # create patient with sampled LOS
         pid = int(random.random() * 1e6)  # simple unique ID
         los = self.sample_los(unit)
         patient = Patient(pid=pid, unit=unit, arrival_time=self.clock, los=los)
 
-        # Attempt admission immediately
+        # attempt admission immediately
         self.schedule(
             Event(time=self.clock, etype=EventType.ADMIT, payload={"patient": patient})
         )
 
-        # Schedule next arrival using exponential interarrival time
+        # schedule next arrival using exponential interarrival time
         next_time = self.clock + random.expovariate(self.arrival_rate)
         self.schedule(Event(time=next_time, etype=EventType.ARRIVAL))
 
@@ -232,11 +243,33 @@ class SimulationEngine:
     def handle_discharge(self, evt: Event):
         patient: Patient = evt.payload["patient"]
         pool = self.beds[patient.unit]
-        pool.release_bed(patient, now=self.clock)
+
+        # bed now enters cleaning; do not immediately free it
+        turnover_time = self.sample_turnover(patient.unit)
+        turnover_done_time = self.clock + turnover_time
+
+        print(f"[t={self.clock}] DISCHARGE: {patient} "
+            f"(Bed entering turnover for {turnover_time:.2f} hrs)")
+
+        # schedule TURNOVER_DONE event
+        self.schedule(Event(
+            time=turnover_done_time,
+            etype=EventType.TURNOVER_DONE,
+            payload={"unit": patient.unit}
+        ))
+
+        # metrics: record discharge event itself (patient leaves)
+        pool.metrics.record_discharge(patient)
+
 
     def handle_turnover_done(self, evt: Event):
-        # placeholder for testing; included to show the full lifecycle structure
-        print(f"[t={self.clock}] TURNOVER_DONE (noop in Step 1) payload={evt.payload}")
+        unit = evt.payload["unit"]
+        pool = self.beds[unit]
+        if pool.occupied > 0:
+            pool.occupied -= 1
+        print(f"[t={self.clock}] TURNOVER_DONE: {unit.name} bed cleaned "
+            f"(Occupied={pool.occupied}/{pool.capacity})")
+
 
 
 # --------------- stochastic demo ----------------
