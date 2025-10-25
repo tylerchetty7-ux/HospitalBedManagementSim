@@ -1,0 +1,8 @@
+{
+  "arrival_rate": 0.5,
+  "icu_beds": 2,
+  "med_beds": 3,
+  "cleaners": 2,
+  "seed": 101,
+  "horizon": 100.0
+}
