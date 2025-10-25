@@ -1,0 +1,2 @@
+run_id,arrival_rate,icu_beds,med_beds,cleaners,avg_occupancy_icu,avg_occupancy_med,avg_queue_icu,avg_queue_med,avg_board_icu,avg_board_med,failed_icu,failed_med
+run_101,0.5,2,3,2,1.579,1.61,0.715,0.223,6.401206774283441,2.3910476793708484,0,0
