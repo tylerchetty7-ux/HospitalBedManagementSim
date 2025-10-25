@@ -21,8 +21,8 @@ This project models stochastic patient arrivals, ICU/Med-Surg bed assignment, ho
 - **Automated Data Export**  
   Writes detailed event logs, time-series state snapshots, and summary metrics to `/output/` as `.csv` and `.json` files.
 - **Experiment Framework**  
-  - `experiments.py` → runs a single configuration (`config.json`)  
-  - `experiments_grid.py` → runs multiple parameter combinations and produces summary plots  
+  - `experiments.py` -> runs a single configuration (`config.json`)  
+  - `experiments_grid.py` -> runs multiple parameter combinations and produces summary plots  
 
 ### Future Enhancements (M4/M5)
 - Sensitivity analysis and validation
