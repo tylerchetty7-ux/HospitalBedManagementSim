@@ -1,54 +1,54 @@
 {
   "run_id": "run_102",
   "params": {
-    "arrival_rate": 0.7,
-    "icu_capacity": 2,
-    "med_capacity": 3,
-    "housekeepers": 2,
+    "arrival_rate": 0.6,
+    "icu_capacity": 3,
+    "med_capacity": 4,
+    "housekeepers": 3,
     "horizon": 100.0,
     "seed": 102
   },
   "metrics": {
     "admissions": {
-      "ICU": 19,
-      "MED_SURG": 43
+      "ICU": 16,
+      "MED_SURG": 36
     },
     "discharges": {
-      "ICU": 19,
-      "MED_SURG": 43
+      "ICU": 16,
+      "MED_SURG": 36
     },
     "failed": {
       "ICU": 0,
       "MED_SURG": 0
     },
     "avg_boarding_time": {
-      "ICU": 5.5119931756513,
-      "MED_SURG": 1.5051721161552054
+      "ICU": 2.235372201400141,
+      "MED_SURG": 0.0
     },
     "max_boarding_time": {
-      "ICU": 10.403725681263133,
-      "MED_SURG": 3.4579624015318142
+      "ICU": 4.312527610331003,
+      "MED_SURG": 0.0
     },
     "boarded_count": {
-      "ICU": 10,
-      "MED_SURG": 11
+      "ICU": 4,
+      "MED_SURG": 0
     },
     "avg_occupancy": {
-      "ICU": 1.304,
-      "MED_SURG": 2.309
+      "ICU": 1.014,
+      "MED_SURG": 1.798
     },
     "avg_queue_len": {
-      "ICU": 0.529,
-      "MED_SURG": 0.159
+      "ICU": 0.084,
+      "MED_SURG": 0.0
     },
     "max_occupancy": {
-      "ICU": 2,
-      "MED_SURG": 3
+      "ICU": 3,
+      "MED_SURG": 4
     },
     "max_queue_len": {
-      "ICU": 4,
-      "MED_SURG": 2
+      "ICU": 3,
+      "MED_SURG": 0
     },
-    "sim_time": 104.147
+    "sim_time": 106.664
   }
 }
