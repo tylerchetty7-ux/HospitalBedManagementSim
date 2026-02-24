@@ -38,6 +38,7 @@ The model captures stochastic patient arrivals, ICU and Med-Surg bed assignment,
 ---
 
 ## Project Structure
+```bash 
 HospitalBedManagementSim/
 ├── src/
 │ ├── engine.py # core simulation logic
@@ -48,6 +49,7 @@ HospitalBedManagementSim/
 ├── requirements.txt
 ├── .gitignore
 └── README.md
+```
 
 ---
 
